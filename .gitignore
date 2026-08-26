@@ -1,0 +1,7 @@
+temp/
+logs/
+*.log
+*.tmp
+.env
+.env.*
+secrets/
