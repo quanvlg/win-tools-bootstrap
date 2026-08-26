@@ -63,14 +63,15 @@ function Initialize-Directories {
 function Test-Windows {
     Write-Log 'Checking operating system...'
 
-    if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
-        throw 'This bootstrap can only run on Windows.'
-    }
+    # Compatible with both:
+    # - Windows PowerShell 5.1
+    # - PowerShell 7+
 
     if ($env:OS -ne 'Windows_NT') {
         throw 'This bootstrap can only run on Windows.'
     }
 
+    Write-Log "PowerShell version: $($PSVersionTable.PSVersion)" 'OK'
     Write-Log 'Windows detected.' 'OK'
 }
 
