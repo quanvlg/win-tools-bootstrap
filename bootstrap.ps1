@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 
 $Script:AppName    = 'WinTools'
 $Script:Version    = '0.1.0'
-$Script:ApiBaseUrl = 'https://license.example.com/api/v1'
+$Script:ApiBaseUrl = 'http://192.168.1.104:8000/api/v1'
 
 $Script:InstallRoot = Join-Path $env:ProgramData $Script:AppName
 $Script:TempRoot    = Join-Path $Script:InstallRoot 'temp'
@@ -75,46 +75,7 @@ function Test-Windows {
     Write-Log 'Windows detected.' 'OK'
 }
 
-function Get-MachineGuid {
-    $path = 'HKLM:\SOFTWARE\Microsoft\Cryptography'
 
-    try {
-        $value = Get-ItemPropertyValue `
-            -Path $path `
-            -Name 'MachineGuid' `
-            -ErrorAction Stop
-
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            throw 'MachineGuid is empty.'
-        }
-
-        return $value
-    }
-    catch {
-        throw "Unable to obtain Windows MachineGuid: $($_.Exception.Message)"
-    }
-}
-
-function Get-DeviceId {
-    param(
-        [Parameter(Mandatory)]
-        [string]$MachineGuid
-    )
-
-    $inputBytes = [Text.Encoding]::UTF8.GetBytes(
-        "$Script:AppName|$MachineGuid"
-    )
-
-    $sha256 = [Security.Cryptography.SHA256]::Create()
-
-    try {
-        $hash = $sha256.ComputeHash($inputBytes)
-        return ([BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
-    }
-    finally {
-        $sha256.Dispose()
-    }
-}
 
 function Read-LicenseKey {
     Write-Host ''
@@ -133,43 +94,51 @@ function Read-LicenseKey {
     return $key
 }
 
-function Get-DeviceInfo {
-    param(
-        [Parameter(Mandatory)]
-        [string]$DeviceId
-    )
-
-    return @{
-        device_id = $DeviceId
-        os        = [Environment]::OSVersion.Version.ToString()
-        arch      = if ([Environment]::Is64BitOperatingSystem) {
-            'x64'
-        }
-        else {
-            'x86'
-        }
-        powershell = $PSVersionTable.PSVersion.ToString()
-    }
-}
 
 function Invoke-LicenseApi {
     param(
         [Parameter(Mandatory)]
-        [string]$LicenseKey,
-
-        [Parameter(Mandatory)]
-        [hashtable]$DeviceInfo
+        [string]$LicenseKey
     )
 
     Write-Log 'Authenticating license...'
 
-    # ========================================================
-    # TODO:
-    # Đây sẽ được thay bằng API thật.
-    # Tuyệt đối không đưa GitHub token vào bootstrap.
-    # ========================================================
+    $uri = "$Script:ApiBaseUrl/license/activate"
 
-    throw 'License API is not configured yet.'
+    Write-Log "API URL: $uri"
+
+    $body = @{
+        license_key = $LicenseKey
+    } | ConvertTo-Json -Compress
+
+    try {
+
+        $response = Invoke-RestMethod `
+            -Uri $uri `
+            -Method Post `
+            -ContentType 'application/json' `
+            -Body $body `
+            -TimeoutSec 15 `
+            -ErrorAction Stop
+
+        if (-not $response.success) {
+            throw 'License activation failed.'
+        }
+
+        if ([string]::IsNullOrWhiteSpace($response.access_token)) {
+            throw 'License API did not return an access token.'
+        }
+
+        Write-Log 'License authenticated successfully.' 'OK'
+        Write-Log "Product: $($response.product)"
+        Write-Log "License expires: $($response.expires_at)"
+
+        return $response
+    }
+    catch {
+        Write-Log "API ERROR: $($_.ToString())" 'ERROR'
+        throw
+    }
 }
 
 function Start-Bootstrap {
@@ -184,22 +153,14 @@ function Start-Bootstrap {
 
     Write-Log 'Reading machine identity...'
 
-    $machineGuid = Get-MachineGuid
-    $deviceId    = Get-DeviceId -MachineGuid $machineGuid
-
-    Write-Log 'Device identity generated.' 'OK'
-
-    $deviceInfo = Get-DeviceInfo -DeviceId $deviceId
-
-    Write-Log 'Device information prepared.' 'OK'
-
     $licenseKey = Read-LicenseKey
 
     Write-Log 'License key received.'
 
     $result = Invoke-LicenseApi `
-        -LicenseKey $licenseKey `
-        -DeviceInfo $deviceInfo
+        -LicenseKey $licenseKey
+
+    Write-Log 'License authentication completed.' 'OK'
 
     return $result
 }

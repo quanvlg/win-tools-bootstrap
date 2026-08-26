@@ -1,0 +1,26 @@
+Invoke-RestMethod `
+    -Uri "http://192.168.1.104:8000/api/v1/license/activate" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body '{"license_key":"WT-F97C-42CC-F5E"}'
+
+
+
+    $body = @{
+    license_key = 'WT-F97C-42CC-F5E'
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Uri "http://192.168.1.104:8000/api/v1/license/activate" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $body
+
+$body = @{
+license_key = 'WT-F97C-42CC-F5E'
+} | ConvertTo-Json
+Invoke-RestMethod `
+    -Uri "http://192.168.1.104:8000/api/v1/license/activate" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $body
