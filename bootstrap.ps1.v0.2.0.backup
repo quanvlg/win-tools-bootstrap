@@ -52,54 +52,6 @@ $ErrorActionPreference = "Stop"
 
 $script:BootstrapVersion = "0.2.0"
 
-# ============================================================
-# TEMPORARY PACKAGE WORKSPACE
-# ============================================================
-
-$PackageWorkspace = $null
-$PackageZipPath    = $null
-$PackageExtractDir = $null
-
-function New-PackageWorkspace {
-
-    $tempBase = Join-Path $env:TEMP "WinTools"
-
-    if (-not (Test-Path -LiteralPath $tempBase)) {
-        New-Item `
-            -ItemType Directory `
-            -Path $tempBase `
-            -Force `
-            | Out-Null
-    }
-
-    $workspaceId = [Guid]::NewGuid().ToString("N")
-
-    $workspace = Join-Path `
-        $tempBase `
-        $workspaceId
-
-    $zipPath = Join-Path `
-        $workspace `
-        "package.zip"
-
-    $extractDir = Join-Path `
-        $workspace `
-        "package"
-
-    New-Item `
-        -ItemType Directory `
-        -Path $workspace `
-        -Force `
-        | Out-Null
-
-    $script:PackageWorkspace = $workspace
-    $script:PackageZipPath = $zipPath
-    $script:PackageExtractDir = $extractDir
-
-    Write-Log "Temporary workspace: $workspace" -Level INFO
-
-    return $workspace
-}
 # ------------------------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------------------------
@@ -577,86 +529,22 @@ function Download-Package {
         [string]$Filename
     )
 
-    # ========================================
-    # Validate filename
-    # ========================================
-
-    $safeFilename = [System.IO.Path]::GetFileName($Filename)
-
-    if ([string]::IsNullOrWhiteSpace($safeFilename)) {
-        throw "Invalid package filename."
-    }
+    $safeFilename = [IO.Path]::GetFileName($Filename)
 
     if ($safeFilename -ne $Filename) {
+
         throw "Invalid package filename."
     }
 
-    # ========================================
-    # Create temporary WinTools directory
-    # ========================================
-
-    try {
-
-        $tempRoot = Join-Path $env:TEMP "WinTools"
-
-        if (-not (Test-Path -LiteralPath $tempRoot)) {
-
-            New-Item `
-                -ItemType Directory `
-                -Path $tempRoot `
-                -Force `
-                -ErrorAction Stop | Out-Null
-        }
-
-        # Random staging directory for this execution
-        $stagingRoot = Join-Path `
-            $tempRoot `
-            ([guid]::NewGuid().ToString("N"))
-
-        New-Item `
-            -ItemType Directory `
-            -Path $stagingRoot `
-            -Force `
-            -ErrorAction Stop | Out-Null
-
-        # Save staging path globally for later steps / cleanup
-        $script:Config.CacheRoot = $stagingRoot
-        $script:Config.StagingRoot = $stagingRoot
-
-        Write-Log "Temporary staging directory created."
-        Write-Log "Staging: $stagingRoot"
-
-    }
-    catch {
-
-        Write-Log `
-            "Cannot create temporary staging directory: $($_.Exception.Message)" `
-            "ERROR"
-
-        throw
-    }
-
-    # ========================================
-    # Package destination
-    # ========================================
-
     $destination = Join-Path `
-        $stagingRoot `
+        $script:Config.CacheRoot `
         $safeFilename
-
-    # ========================================
-    # API URL
-    # ========================================
 
     $uri = $script:Config.ApiBaseUrl +
         $script:Config.DownloadEndpoint
 
     Write-Log "Downloading package..."
     Write-Log "Filename: $safeFilename"
-
-    # ========================================
-    # Authorization
-    # ========================================
 
     $headers = @{
         Authorization = "Bearer $AccessToken"
@@ -673,18 +561,12 @@ function Download-Package {
             -TimeoutSec $script:Config.DownloadTimeoutSec `
             -ErrorAction Stop
 
-        # ========================================
-        # Validate downloaded file
-        # ========================================
-
         if (-not (Test-Path -LiteralPath $destination)) {
 
             throw "Downloaded package does not exist."
         }
 
-        $file = Get-Item `
-            -LiteralPath $destination `
-            -ErrorAction Stop
+        $file = Get-Item -LiteralPath $destination
 
         if ($file.Length -le 0) {
 
@@ -695,9 +577,6 @@ function Download-Package {
             "Package downloaded: $($file.Length) bytes" `
             "OK"
 
-        Write-Log `
-            "Package path: $destination"
-
         return $destination
     }
     catch {
@@ -706,27 +585,10 @@ function Download-Package {
             "Package download failed: $($_.Exception.Message)" `
             "ERROR"
 
-        # Remove package
-        if (Test-Path -LiteralPath $destination) {
-
-            Remove-Item `
-                -LiteralPath $destination `
-                -Force `
-                -ErrorAction SilentlyContinue
-        }
-
-        # Remove staging directory
-        if (
-            $stagingRoot -and
-            (Test-Path -LiteralPath $stagingRoot)
-        ) {
-
-            Remove-Item `
-                -LiteralPath $stagingRoot `
-                -Recurse `
-                -Force `
-                -ErrorAction SilentlyContinue
-        }
+        Remove-Item `
+            -LiteralPath $destination `
+            -Force `
+            -ErrorAction SilentlyContinue
 
         throw
     }
@@ -817,9 +679,7 @@ function Expand-Package {
     $packageRoot = Join-Path `
         $script:Config.PackageRoot `
         $safeVersion
-    Write-Log "DEBUG CacheRoot: $($script:Config.CacheRoot)"
-    Write-Log "DEBUG StagingRoot: $($script:Config.StagingRoot)"
-    Write-Log "DEBUG PackagePath: $PackagePath"
+
     Write-Log "Preparing package staging..."
 
     if (Test-Path -LiteralPath $stagingRoot) {
@@ -882,17 +742,8 @@ function Test-PackageStructure {
     $entrypoint = Join-Path `
         $PackageDirectory `
         "install.ps1"
-    
-        if (-not (Test-Path -LiteralPath $entrypoint -PathType Leaf)) {
 
-            throw "Package entrypoint install.ps1 was not found."
-        }
-
-        Write-Log `
-            "Package entrypoint found: install.ps1" `
-            -Level OK
-
-        if (-not (Test-Path -LiteralPath $entrypoint)) {
+    if (-not (Test-Path -LiteralPath $entrypoint)) {
 
         throw "Package entrypoint install.ps1 not found."
     }
@@ -1011,51 +862,33 @@ function Invoke-Package {
 
 function Remove-TemporaryFiles {
 
+    param(
+        [string]$PackageFile,
+        [string]$StagingDirectory
+    )
+
     Write-Log "Cleaning temporary files..."
 
-    $stagingRoot = $script:Config.CacheRoot
-
-    if ([string]::IsNullOrWhiteSpace($stagingRoot)) {
-
-        Write-Log "No temporary staging directory to clean." "INFO"
-
-        return
-    }
-
-    if (-not (Test-Path -LiteralPath $stagingRoot)) {
-
-        Write-Log "Temporary staging directory already removed." "INFO"
-
-        $script:Config.CacheRoot = $null
-
-        return
-    }
-
-    try {
-
-        Write-Log "Removing staging directory..."
-        Write-Log "Path: $stagingRoot"
+    if ($PackageFile -and
+        (Test-Path -LiteralPath $PackageFile)) {
 
         Remove-Item `
-            -LiteralPath $stagingRoot `
+            -LiteralPath $PackageFile `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+    if ($StagingDirectory -and
+        (Test-Path -LiteralPath $StagingDirectory)) {
+
+        Remove-Item `
+            -LiteralPath $StagingDirectory `
             -Recurse `
             -Force `
-            -ErrorAction Stop
-
-        Write-Log `
-            "Temporary staging removed successfully." `
-            "OK"
+            -ErrorAction SilentlyContinue
     }
-    catch {
 
-        Write-Log `
-            "Cleanup warning: $($_.Exception.Message)" `
-            "WARN"
-    }
-    finally {
-
-        $script:Config.CacheRoot = $null
-    }
+    Write-Log "Cleanup completed." "OK"
 }
 
 
@@ -1163,7 +996,6 @@ try {
     # --------------------------------------------------------------------------
     # 8. EXTRACT
     # --------------------------------------------------------------------------
-    Write-Log "Preparing package staging..." -Level INFO
 
     $paths = Expand-Package `
         -ZipPath $packageFile `
@@ -1199,7 +1031,8 @@ try {
     # SUCCESS
     # --------------------------------------------------------------------------
 
-    Remove-TemporaryFiles
+    Remove-TemporaryFiles `
+        -PackageFile $packageFile
 
     $packageFile = $null
 
