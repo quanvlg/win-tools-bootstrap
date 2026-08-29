@@ -1,5 +1,49 @@
 #requires -Version 5.1
 
+# ============================================================
+# REQUIRE ADMINISTRATOR
+# ============================================================
+
+function Test-IsAdministrator {
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+
+    $principal = New-Object `
+        Security.Principal.WindowsPrincipal `
+        $identity
+
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+
+if (-not (Test-IsAdministrator)) {
+
+    Write-Host ""
+    Write-Host "[INFO] Administrator privileges are required."
+    Write-Host "[INFO] Requesting elevation..."
+    Write-Host ""
+
+    $bootstrapUrl = "https://raw.githubusercontent.com/quanvlg/win-tools-bootstrap/main/bootstrap.ps1"
+
+    $elevatedCommand = @"
+`$ErrorActionPreference = 'Stop'
+irm '$bootstrapUrl' | iex
+"@
+
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -Verb RunAs `
+        -ArgumentList @(
+            "-NoProfile"
+            "-ExecutionPolicy", "Bypass"
+            "-Command", $elevatedCommand
+        )
+
+    exit 0
+}
+
 [CmdletBinding()]
 param()
 
