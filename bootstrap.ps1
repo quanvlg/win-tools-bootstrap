@@ -1,6 +1,11 @@
 #requires -Version 5.1
+
 [CmdletBinding()]
 param()
+
+$ErrorActionPreference = "Stop"
+
+
 # ============================================================
 # REQUIRE ADMINISTRATOR
 # ============================================================
@@ -26,7 +31,9 @@ if (-not (Test-IsAdministrator)) {
     Write-Host "[INFO] Requesting elevation..."
     Write-Host ""
 
-    $bootstrapUrl = "https://raw.githubusercontent.com/quanvlg/win-tools-bootstrap/main/bootstrap.ps1"
+    # IMPORTANT:
+    # Use the same branch that you use to launch Bootstrap.
+    $bootstrapUrl = "https://raw.githubusercontent.com/quanvlg/win-tools-bootstrap/master/bootstrap.ps1"
 
     $elevatedCommand = @"
 `$ErrorActionPreference = 'Stop'
@@ -40,12 +47,20 @@ irm '$bootstrapUrl' | iex
             "-NoProfile"
             "-ExecutionPolicy", "Bypass"
             "-Command", $elevatedCommand
-        )
+        ) `
+        -ErrorAction Stop
 
     exit 0
 }
 
 
+# ============================================================
+# BOOTSTRAP CONTINUES HERE
+# ============================================================
+
+Write-Host ""
+Write-Host "[OK] Administrator privileges confirmed."
+Write-Host ""
 
 # ============================================================
 # WIN TOOLS - AUTO ELEVATION
