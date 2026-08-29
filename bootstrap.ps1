@@ -5,7 +5,6 @@ param()
 
 $ErrorActionPreference = "Stop"
 
-
 # ============================================================
 # REQUIRE ADMINISTRATOR
 # ============================================================
@@ -31,8 +30,6 @@ if (-not (Test-IsAdministrator)) {
     Write-Host "[INFO] Requesting elevation..."
     Write-Host ""
 
-    # IMPORTANT:
-    # Use the same branch that you use to launch Bootstrap.
     $bootstrapUrl = "https://raw.githubusercontent.com/quanvlg/win-tools-bootstrap/master/bootstrap.ps1"
 
     $elevatedCommand = @"
@@ -53,6 +50,10 @@ irm '$bootstrapUrl' | iex
     exit 0
 }
 
+
+Write-Host ""
+Write-Host "[OK] Administrator privileges confirmed."
+Write-Host ""
 
 # ============================================================
 # BOOTSTRAP CONTINUES HERE
