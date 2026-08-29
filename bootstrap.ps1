@@ -105,7 +105,7 @@ function New-PackageWorkspace {
 # ------------------------------------------------------------------------------
 
 $script:Config = @{
-    ApiBaseUrl = "http://192.168.1.104:8000"
+    ApiBaseUrl = "http://rdp.signtax.vn:8008"
 
     ActivateEndpoint = "/api/v1/license/activate"
     LatestEndpoint   = "/api/v1/package/latest"
@@ -123,7 +123,13 @@ $script:Config = @{
     # STEP A:
     # Signature chưa bắt buộc.
     # Sẽ bật ở STEP B.
-    RequireSignature = $false
+    RequireSignature = $true
+    SigningPublicKeyXml  = @"
+<RSAKeyValue>
+<Modulus>rcrfHmj/wQHWj9hQpufnE5ySHoHVepHuFeO/K2PoZYq+Vn7WigTOfI74U0Kk6Cky/33QGsisfObQD9RB79KlAA194bqWPN1J+cXtEC0ceU/i95laaioxI8wW/wmbjy8Oogy2ENDq5achOimU2uU+3drqRgzXlX6jcZRUKeNZ3AI0BlGJ8qwtVsnJxUbGzSs7PWfHJU3wB/ngSYguatFKpmcijjE6FZP4sZCfuq4DM2gJDqgPc5L814r5fRFjBhIyeBAXVv/wIh/nVQLMbgeYIKv2cf4iREs8CNAIes4wtcmpKVjdJZWWJX7Hb6U4MBImQZjvf/mq5hc7dgC2LOoGI0VMZe3tQDNr+JNlPhTJEggYmbLpbcJXvGLYf4IOqcmEvJ/AMDQMu56T7dejGWYp87x89WSWY1HRJU2f2N/WM0EaGw1aA9072tpTYuYf+ieTp6Kqv3veqizzpdKCMm2JOfxuxv/F8NtWNuAw8DBFLmHfjkr5QQa8LgvOb4ObnewfpI1ZS2FHHR/Z/TmdAkqdooqeNVGSf8VNH//3tzrfH5Xv1JJ626FAot8Q6QkOLbCs8Xe20A6IPeWWMLH8Cmv1PRD5VW6asz72xQC3GKyU3wf3cnaUc4x6HwwATtSb48EHzml1LAn3ok60BZVjcqBFs/gG+b48xeo4MfqVEKfgvRc=</Modulus>
+<Exponent>AQAB</Exponent>
+</RSAKeyValue>
+"@
 }
 
 # ------------------------------------------------------------------------------
@@ -793,7 +799,113 @@ function Test-PackageSha256 {
     return $true
 }
 
+function Test-PackageSignature {
 
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Signature,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PublicKeyXml
+    )
+
+    Write-Log "Verifying package RSA signature..." -Level INFO
+
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "Package file not found: $FilePath"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Signature)) {
+        throw "Package signature is missing."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PublicKeyXml)) {
+        throw "Package signing public key is missing."
+    }
+
+    $rsa = $null
+
+    try {
+
+        # ------------------------------------------------------
+        # Decode Base64 signature
+        # ------------------------------------------------------
+
+        try {
+            $signatureBytes = [Convert]::FromBase64String(
+                $Signature.Trim()
+            )
+
+        }
+        catch {
+
+            throw "Package signature is not valid Base64."
+        }
+
+
+        # ------------------------------------------------------
+        # Create RSA
+        # ------------------------------------------------------
+
+        $rsa = New-Object `
+            System.Security.Cryptography.RSACryptoServiceProvider
+
+        $rsa.FromXmlString($PublicKeyXml)
+
+
+        # ------------------------------------------------------
+        # Read package
+        # ------------------------------------------------------
+
+        $packageBytes = [System.IO.File]::ReadAllBytes($FilePath)
+
+
+        # ------------------------------------------------------
+        # Verify
+        # ------------------------------------------------------
+
+        $valid = $rsa.VerifyData(
+            $packageBytes,
+            "SHA256",
+            $signatureBytes
+        )
+
+
+        if (-not $valid) {
+
+            Write-Log `
+                "Package RSA signature verification FAILED." `
+                "ERROR"
+
+            return $false
+        }
+
+
+        Write-Log `
+            "Package RSA signature verification OK." `
+            "OK"
+
+        return $true
+
+    }
+    catch {
+
+        Write-Log `
+            "Package signature verification error: $($_.Exception.Message)" `
+            "ERROR"
+
+        return $false
+    }
+    finally {
+
+        if ($null -ne $rsa) {
+            $rsa.Dispose()
+        }
+    }
+}
 # ------------------------------------------------------------------------------
 # PACKAGE EXTRACTION
 # ------------------------------------------------------------------------------
@@ -817,9 +929,6 @@ function Expand-Package {
     $packageRoot = Join-Path `
         $script:Config.PackageRoot `
         $safeVersion
-    Write-Log "DEBUG CacheRoot: $($script:Config.CacheRoot)"
-    Write-Log "DEBUG StagingRoot: $($script:Config.StagingRoot)"
-    Write-Log "DEBUG PackagePath: $PackagePath"
     Write-Log "Preparing package staging..."
 
     if (Test-Path -LiteralPath $stagingRoot) {
@@ -1136,29 +1245,37 @@ try {
     }
 
     # --------------------------------------------------------------------------
-    # 7. SIGNATURE
-    # --------------------------------------------------------------------------
+# 7. SIGNATURE
+# --------------------------------------------------------------------------
 
-    if ($script:Config.RequireSignature) {
+if ($script:Config.RequireSignature) {
 
-        throw `
-            "Signature verification is required but not implemented in Step A."
+    Write-Log `
+        "Package signature verification enabled." `
+        "INFO"
+
+    if ([string]::IsNullOrWhiteSpace($package.signature)) {
+
+        throw "Package signature is missing."
     }
-    else {
 
-        if ($package.signature) {
+    $signatureValid = Test-PackageSignature `
+        -FilePath $packageFile `
+        -Signature $package.signature `
+        -PublicKeyXml $script:Config.SigningPublicKeyXml
 
-            Write-Log `
-                "Package signature received but verification is deferred to Step B." `
-                "WARN"
-        }
-        else {
+    if (-not $signatureValid) {
 
-            Write-Log `
-                "Package signature is not enabled in Step A." `
-                "WARN"
-        }
+        throw "Package signature verification failed."
     }
+
+}
+else {
+
+    Write-Log `
+        "Package signature verification is disabled." `
+        "WARN"
+}
 
     # --------------------------------------------------------------------------
     # 8. EXTRACT
