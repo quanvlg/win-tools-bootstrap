@@ -1,5 +1,6 @@
 #requires -Version 5.1
-
+[CmdletBinding()]
+param()
 # ============================================================
 # REQUIRE ADMINISTRATOR
 # ============================================================
@@ -44,8 +45,7 @@ irm '$bootstrapUrl' | iex
     exit 0
 }
 
-[CmdletBinding()]
-param()
+
 
 # ============================================================
 # WIN TOOLS - AUTO ELEVATION
